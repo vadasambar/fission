@@ -1,11 +1,12 @@
-
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
 const process = require('process');
-const fastify = require('fastify');
-const app = fastify({ trustProxy: true, logger: true });
+const express = require('express');
+const app = express();
+const bodyParser = require('body-parser');
+const morgan = require('morgan');
 const argv = require('minimist')(process.argv.slice(1));// Command line opts
 
 if (!argv.port) {
@@ -76,29 +77,26 @@ function specialize(req, res) {
     // function deps in the right place in argv.codepath; b ut for now we
     // just symlink the function's node_modules to the server's
     // node_modules.
-    try {
-      fs.symlinkSync('/usr/src/app/node_modules', `${path.dirname(modulepath)}/node_modules`);
-    } catch (error) {
-      
-    }
-    
-    
+    fs.symlinkSync('/usr/src/app/node_modules', `${path.dirname(modulepath)}/node_modules`);
 
     const result = loadFunction(modulepath);
 
     if(isFunction(result)){
         userFunction = result;
-        res.code(202).send();
+        res.status(202).send();
     } else {
-        res.code(500).send(JSON.stringify(result));
+        res.status(500).send(JSON.stringify(result));
     }
 }
 
-app.addContentTypeParser(
-  'text/plain',
-  { parseAs: 'string' },
-  (req, body, done) => done(body)
-)
+
+// Request logger
+app.use(morgan('combined'))
+
+app.use(bodyParser.urlencoded({ extended: false }));
+app.use(bodyParser.json());
+app.use(bodyParser.raw());
+app.use(bodyParser.text({ type : "text/*" }));
 
 app.post('/specialize', withEnsureGeneric(specialize));
 app.post('/v2/specialize', withEnsureGeneric(specializeV2));
@@ -121,7 +119,7 @@ app.all('/', function (req, res) {
             return;
         if (headers) {
             for (let name of Object.keys(headers)) {
-                res.header(name, headers[name]);
+                res.set(name, headers[name]);
             }
         }
         res.status(status).send(body);
