@@ -5,6 +5,7 @@ dist: trusty
 branches:
   only:
   - master
+  - tesserai-fetcher-config
 
 language: go
 
