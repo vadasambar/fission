@@ -118,7 +118,7 @@ func (cfg *Config) NewSpecializeRequest(fn *crd.Function, env *crd.Environment) 
 	// still try to load user function from hard coded
 	// path /userfunc/user
 	targetFilename := "user"
-	if env.Spec.Version == 2 {
+	if env.Spec.Version >= 2 {
 		targetFilename = string(fn.Metadata.UID)
 	}
 
