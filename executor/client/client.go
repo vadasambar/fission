@@ -74,7 +74,7 @@ func (c *Client) GetServiceForFunction(ctx context.Context, metadata *metav1.Obj
 
 	svcName, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("Returning from ioutil read body")
+		log.Printf("Returning from ioutil read body: %v", err)
 		return "", err
 	}
 
@@ -82,6 +82,7 @@ func (c *Client) GetServiceForFunction(ctx context.Context, metadata *metav1.Obj
 }
 
 func (c *Client) service() {
+	// TODO: we should check the availability of service address to avoid tapping non-exists address.
 	ticker := time.NewTicker(time.Second * 5)
 	for {
 		select {

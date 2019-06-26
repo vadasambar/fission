@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
+	"github.com/pkg/errors"
 	"go.opencensus.io/plugin/ochttp"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -35,7 +36,8 @@ import (
 func (executor *Executor) getServiceForFunctionApi(w http.ResponseWriter, r *http.Request) {
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "Failed to read request", http.StatusInternalServerError)
+		e := errors.Wrap(err, "Failed to read request")
+		http.Error(w, e.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -43,7 +45,8 @@ func (executor *Executor) getServiceForFunctionApi(w http.ResponseWriter, r *htt
 	m := metav1.ObjectMeta{}
 	err = json.Unmarshal(body, &m)
 	if err != nil {
-		http.Error(w, "Failed to parse request", http.StatusBadRequest)
+		e := errors.Wrap(err, "Failed to parse request")
+		http.Error(w, e.Error(), http.StatusBadRequest)
 		return
 	}
 

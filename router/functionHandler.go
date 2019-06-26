@@ -214,7 +214,7 @@ func (roundTripper RetryingRoundTripper) RoundTrip(req *http.Request) (resp *htt
 	// cache, then retry to get new svc record from executor again.
 	retryCounter := 0
 
-	for i := 0; i < roundTripper.funcHandler.tsRoundTripperParams.maxRetries-1; i++ {
+	for i := 0; i < roundTripper.funcHandler.tsRoundTripperParams.maxRetries; i++ {
 		// get function service url from cache or executor
 		serviceUrl, serviceUrlFromCache, err := roundTripper.funcHandler.getServiceEntry(req.Context())
 		if err != nil {
@@ -240,6 +240,7 @@ func (roundTripper RetryingRoundTripper) RoundTrip(req *http.Request) (resp *htt
 		// so here we retry to get service url again
 		if serviceUrl == nil {
 			time.Sleep(executingTimeout)
+			executingTimeout = executingTimeout * time.Duration(roundTripper.funcHandler.tsRoundTripperParams.timeoutExponent)
 			continue
 		}
 
@@ -309,38 +310,35 @@ func (roundTripper RetryingRoundTripper) RoundTrip(req *http.Request) (resp *htt
 
 		// dial timeout or dial network errors goes here
 
-		if retryCounter < roundTripper.funcHandler.tsRoundTripperParams.svcAddrRetryCount {
-			executingTimeout = executingTimeout * time.Duration(roundTripper.funcHandler.tsRoundTripperParams.timeoutExponent)
-			retryCounter++
+		if i < roundTripper.funcHandler.tsRoundTripperParams.maxRetries-1 {
+			if retryCounter < roundTripper.funcHandler.tsRoundTripperParams.svcAddrRetryCount {
+				log.Printf("request to %s errored out. backing off for %v before retrying",
+					req.URL.Host, executingTimeout)
 
-			log.Printf("request to %s errored out. backing off for %v before retrying",
-				req.URL.Host, executingTimeout)
+				time.Sleep(executingTimeout)
+				executingTimeout = executingTimeout * time.Duration(roundTripper.funcHandler.tsRoundTripperParams.timeoutExponent)
 
-			time.Sleep(executingTimeout)
+				retryCounter++
 
-			if serviceUrlFromCache {
-				continue
+				if serviceUrlFromCache {
+					continue
+				}
+			} else {
+				// if transport.RoundTrip returns a network dial error and serviceUrl was from cache,
+				// it means, the entry in router cache is stale, so invalidate it.
+				log.Printf("request to %s errored out. removing function : %s from router's cache "+
+					"and requesting a new service for function",
+					req.URL.Host, fnMeta.Name)
+				roundTripper.funcHandler.fmap.remove(fnMeta)
+				retryCounter = 0
 			}
 		} else {
-			// if transport.RoundTrip returns a network dial error and serviceUrl was from cache,
-			// it means, the entry in router cache is stale, so invalidate it.
-			log.Printf("request to %s errored out. removing function : %s from router's cache "+
-				"and requesting a new service for function",
-				req.URL.Host, fnMeta.Name)
-			roundTripper.funcHandler.fmap.remove(fnMeta)
-			retryCounter = 0
+			// finally, one more retry with the default timeout
+			resp, err = http.DefaultTransport.RoundTrip(req)
+			if err != nil {
+				log.Printf("Error getting response from function %v: %v", fnMeta.Name, err)
+			}
 		}
-
-		// break directly if we still fail at the last round
-		if i >= roundTripper.funcHandler.tsRoundTripperParams.maxRetries-1 {
-			break
-		}
-	}
-
-	// finally, one more retry with the default timeout
-	resp, err = http.DefaultTransport.RoundTrip(req)
-	if err != nil {
-		log.Printf("Error getting response from function %v: %v", fnMeta.Name, err)
 	}
 
 	return resp, err
@@ -532,7 +530,7 @@ func (fh *functionHandler) getServiceEntry(ctx context.Context) (serviceUrl *url
 			// Get service entry from executor and update cache if its the first goroutine
 			if firstToTheLock { // first to the service url
 				log.Printf("Calling getServiceForFunction for function: %s", fh.function.Name)
-				u, err = fh.getServiceEntryFromExecutor(ctx)
+				u, err = fh.getServiceEntryFromExecutor()
 				if err != nil {
 					log.Printf("Error getting service url from executor: %v", err)
 					return nil, err
@@ -591,9 +589,32 @@ func (fh *functionHandler) getServiceEntryFromCache() (serviceUrl *url.URL, err 
 }
 
 // getServiceEntryFromExecutor returns service url entry returns from executor
-func (fh *functionHandler) getServiceEntryFromExecutor(ctx context.Context) (*url.URL, error) {
-	// send a request to executor to specialize a new pod
-	service, err := fh.executor.GetServiceForFunction(ctx, fh.function)
+func (fh *functionHandler) getServiceEntryFromExecutor() (*url.URL, error) {
+
+	var service string
+	var err error
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+	defer close(done)
+
+	go func() {
+		// send a request to executor to specialize a new pod
+		service, err = fh.executor.GetServiceForFunction(ctx, fh.function)
+		if err != nil {
+			select {
+			case <-ctx.Done():
+				err = ctx.Err()
+			default:
+			}
+		}
+		done <- struct{}{}
+	}()
+
+	<-done
+
 	if err != nil {
 		statusCode, errMsg := fission.GetHTTPError(err)
 		log.Printf("Error from GetServiceForFunction for function (%v): %v : %v", fh.function, statusCode, errMsg)
