@@ -93,7 +93,7 @@ func (kafka Kafka) subscribe(trigger *fv1.MessageQueueTrigger) (messageQueueSubs
 	producerConfig.Producer.Return.Successes = true
 	producerConfig.Version = kafka.version
 	producer, err := sarama.NewSyncProducer(kafka.brokers, producerConfig)
-	kafka.logger.Info("created a new producer", zap.Any("consumer", producer))
+	kafka.logger.Info("created a new producer", zap.Any("producer", producer))
 	if err != nil {
 		panic(err)
 	}
@@ -136,7 +136,7 @@ func kafkaMsgHandler(kafka *Kafka, producer sarama.SyncProducer, trigger *fv1.Me
 		kafka.logger.Fatal("unsupported function reference type for trigger",
 			zap.Any("function_reference_type", trigger.Spec.FunctionReference.Type),
 			zap.String("trigger", trigger.Metadata.Name))
-	}
+	}https://stackoverflow.com/questions/44239027/how-to-view-kafka-message
 
 	url := kafka.routerUrl + "/" + strings.TrimPrefix(utils.UrlForFunction(trigger.Spec.FunctionReference.Name, trigger.Metadata.Namespace), "/")
 	kafka.logger.Debug("making HTTP request", zap.String("url", url))
